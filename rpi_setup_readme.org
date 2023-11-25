@@ -1,0 +1,822 @@
+* Install the system
+  + Follow https://archlinuxarm.org/platforms/armv8/broadcom/raspberry-pi-4 to install ArchLinux on SD card
+  + Boot the system and find IP address from router
+  + ssh into the system with the given details
+* Setup basics
+** Packages
+   + Setup the pacman keyring as described in the aforementioned article
+   + pacman -Syyu
+   + pacman -S git base-devel python3 sudo screen inetutils bash-completion ntp wget rsync man-db
+   + If interested, install vim/emacs
+   + Debugging packages:
+     usbutils (for lsusb)
+** Config
+   + Edit /etc/hostname to set your hostname
+   + Enable HDMI hotplug:
+
+     https://blog.mivia.dk/solved-hdmi-working-raspberry-pi/
+
+     tl;dr add the two lines to /boot/config.txt
+
+     hdmi_force_hotplug=1
+     hdmi_drive=2
+
+   + For Motorola Droid Bionic Lapdock, add the following to /boot/config.txt
+
+     hdmi_group=2
+     hdmi_cvt=1366 768 60
+     hdmi_mode=87
+
+     (Ref1: https://www.hackster.io/lennart-hennigs/raspberry-pi-4-laptop-082dd1#toc-step-4---setting-the-proper-screen-resolution-4)
+     (Ref2: https://www.raspberrypi.org/documentation/configuration/config-txt/video.md -- for various HDMI config flags and their meanings)
+
+   + Set timezone if necessary
+     https://wiki.archlinux.org/index.php/System_time#Time_zone
+
+   + Setup time synchronization
+
+     Ensure ntp is installed: `sudo pacman -S ntp`
+
+     sudo systemctl enable ntpd.service
+     sudo systemctl start ntpd.service
+
+     Check: `date`
+
+     For some reason, this doesn't work properly. Also consider replacing
+     the servers in /etc/ntp.conf with:
+
+     server 0.pool.ntp.org
+     server 1.pool.ntp.org
+     server 2.pool.ntp.org
+     server 3.pool.ntp.org
+
+     instead of the ArchLinux pool.
+
+** User
+   + Create your own user account
+   + Add it to sudoers if needed
+   + Copy your public key and add it to ~/.ssh/authorized_keys
+   + Copy your .bashrc and other RC files as needed
+   + IMPORTANT: !!!Change root password!!!
+   + usermod -a -G uucp <user> so you can access the serial port
+* I²C setup
+  + Add these lines to /boot/config.txt
+
+    dtparam=i2c_arm=on
+    dtparam=spi=on
+
+  + Edit /etc/modules-load.d/raspberrypi.conf and add
+
+    i2c-dev
+
+  + Install the i2c-tools package:
+
+    sudo pacman -S i2c-tools
+
+  + Run i2cdetect to scan:
+
+    sudo i2cdetect -y 1
+
+  + Allow a user to access the I²C bus:
+
+    sudo groupadd i2c
+    sudo usermod -aG i2c <username>
+
+    And then, switch to root (sudo su) and run:
+
+    echo 'KERNEL=="i2c-[0-9]*", GROUP="i2c"' >> /etc/udev/rules.d/10-local_i2c_group.rules
+
+    Reboot the system for the udev rules to take effect (I guess?)
+
+    I got this info from: https://lexruee.ch/setting-i2c-permissions-for-non-root-users.html
+
+    To check this, after reboot, run for example
+
+    i2cdetect -y 1
+
+    without sudo, and it should work.
+
+* Thumb drive with astrometry and DSS
+  + Create a fast thumb drive with astrometry indexes and DSS imagery -- put them in two different partitions (50GiB enough for astrometry)
+  + Run `sudo blkid` to determine the name of the device (usu. sda1, sda2) and the corresponding UUID
+  + sudo mkdir /mnt/astrometry_indexes
+  + sudo mkdir /mnt/RealSky
+  + Open /etc/fstab for editing (with sudo) and add lines similar to:
+    UUID=12541a14-038f-4fe3-9922-4295bd8fb44e       /mnt/astrometry_indexes     ext4    defaults,ro,nofail      0       0
+    UUID=5cef8985-3330-42c2-bd96-976fcff9b5c9       /mnt/RealSky                ext4    defaults,ro,nofail      0       0
+  + If your data is stored on a Samsung BAR flash drive (090c:1000) like mine, disable the quirks. See:
+    + https://www.raspberrypi.org/forums/viewtopic.php?t=245931
+    + https://www.reddit.com/r/linux4noobs/comments/hxq3zy/how_can_i_disable_a_quirk_module_in_the_kernel/
+    To determine if you need this, first unmount ~/mnt/astrometry_indexes and ~/mnt/RealSky. Then unplug the drive.
+    Now run `dmesg -w`, wait for it to scroll to the end, and then plug the drive back in
+    If you see "Quirks match" chances are you may need to DISABLE it so we use UAS. Note that the first forum post talks about ENABLing a quirk.
+
+    tl;dr edit your command line as sudo and add the following (for Samsung BAR flash drive):
+
+    usb-storage.quirks=090c:1000:
+
+    Then reboot the system.
+* Setup the buildsystem optimizations
+  + Already should've installed base-devel, so gcc and make must exist. Install clang and ccache if needed (sudo pacman -S clang ccache)
+  + Add this to ~/.bashrc to export CXX flags for RPi 4B+
+    ### C++ and C compiler flags ###
+    export CFLAGS='-mcpu=cortex-a72 -mtune=cortex-a72 -mfpu=neon-fp-armv8 -mfloat-abi=hard -O3'
+    export CXXFLAGS='-mcpu=cortex-a72 -mtune=cortex-a72 -mfpu=neon-fp-armv8 -mfloat-abi=hard -O3'
+* Setup code projects
+** Astrometry.net
+   + Install package dependencies: sudo pacman -S cfitsio netpbm python-numpy python-pip python-wheel
+   + Install Python dependencies: sudo pip install pyfits
+   + Install optional dependency of cairo
+   + Download from http://astrometry.net/use.html
+   + Extract, run `make -j3 install`. Check that the CXXFLAGS are picked up!
+
+     NOTE that astrometry.net actually builds when running `make
+     install`, if you run it after `make`, and if you use `sudo` as
+     usual, the `CXXFLAGS` won't get picked up!
+   + Run `make -j3 install` again -- looks like it needs a second make to
+     build everything.
+   + Finally check once that `make -j3 install` does not build anything,
+     and then run `sudo make install`
+   + Check that /usr/local/astrometry/bin/solve-field runs without arguments and displays help
+   + Edit /usr/local/astrometry/etc/astrometry.cfg by removing any
+     `add_path` lines and adding these lines instead:
+
+     add_path /mnt/astrometry_indexes/astrometry_index/4100
+     add_path /mnt/astrometry_indexes/astrometry_index/4200
+
+     Be careful when copy-pasting the above not to have spaces after the
+     entries -- that screws things up.
+
+   + Pay attention to the `inparallel` option in the astrometry.cfg file!
+     Enable it if you can!
+
+   + Try solving a field and make sure it works:
+
+     /usr/local/astrometry/bin/solve-field --overwrite --no-plots ~/tmp/M57_Light_299.fits
+
+** RealSky server
+
+   + Setup keys to access the repo
+
+     ssh-keygen -t rsa -b 4096 -a 100 -o -f ~/.ssh/id_rsa_bas
+
+     Put public key on the server in ~/.ssh/authorized_keys
+
+     Make ~/.ssh/config entry:
+
+     Host bas
+     HostName bas.org.in
+     User akarsh
+     Port 22
+     IdentityFile /home/akarsh/.ssh/id_rsa_bas
+
+     Fix perms on `~/.ssh`:
+
+     chmod og-rX -R ~/.ssh/
+
+     Check that you can `ssh bas`
+
+   + Change into ~/repos or ~/devel or some such appropriate directory and:
+
+     git clone bas:/home/akarsh/realsky_server.git
+
+   + Build:
+
+     make
+
+     Ensure that realsky_server runs:
+
+     ./realsky_server
+
+     Check that the server works as expected:
+
+     http://192.168.0.35:8888/?r=0&d=0
+
+** INDI
+
+   + Dependencies
+
+     sudo pacman -S cmake libnova gsl fftw
+
+   + Setup GSC binary if needed for CCD simulator
+
+     cd ~/devel
+     wget -O bincats_GSC_1.2.tar.gz http://cdsarc.u-strasbg.fr/viz-bin/nph-Cat/tar.gz?bincats/GSC_1.2
+
+     The download will take quite a while (~300 MB download). Instead, I
+     adopted to rsync my existing copy over. Otherwise, extract it
+     normally, and build with:
+
+     cd src/
+     make
+
+     Test that the build succeeded:
+
+     ./gsc.exe
+
+     Then move it:
+
+     sudo mkdir -p /opt/gsc/bin/
+     sudo mkdir -p /opt/gsc/data/bin/
+     sudo mv *.exe /opt/gsc/bin/
+     cd ..
+     ls -d [NS]* | sudo xargs -I{} ln -s `pwd`/{} /opt/gsc/data/{}
+     ls regions.* | sudo xargs -I{} ln -s `pwd`/{} /opt/gsc/data/bin/{}
+     sudo chmod og+rX -R /opt/gsc
+     sudo ln -s /opt/gsc/bin/gsc.exe /usr/local/bin/gsc
+     sudo ln -s /opt/gsc/data/ /usr/share/GSC
+
+     Ensure `GSCDAT` environment variable is not set.
+
+     Finally test with:
+
+     gsc -c 0.0 +0.0
+
+   + Clone
+
+     cd ~/devel
+     git clone https://github.com/indilib/indi.git
+
+   + Build
+
+     cd indi/
+     cmake -DCMAKE_BUILD_TYPE=Release .
+     VERBOSE=1 make -j4
+
+     As before, check compiler flags to make sure optimizations are used
+
+   + Install
+
+     sudo make install
+
+** INDI 3rd party drivers (for QHY, ASI, ...)
+
+
+*** Dependencies
+
+    Make sure INDI dependencies are installed
+    Make sure INDI is built and installed
+
+*** Clone
+
+    cd ~/devel
+    git clone https://github.com/indilib/indi-3rdparty
+
+*** Build
+
+**** Dependency for QHY cameras
+
+     + For QHY cameras, first build libqhy shipped with indi-3rdparty
+
+       cd ~/devel/indi-3rdparty/
+       cd libqhy/
+       cmake -DCMAKE_BUILD_TYPE=Release .
+       make
+       sudo make install
+
+     + You may need to load the firmware using fxload, if for some reason,
+       it does not automatically invoke via
+       /usr/lib/udev/rules.d/85-qhyccd.rules
+
+       First use dmesg or lsusb to find the bus number and device number
+       for the camera. The camera usually shows up as "Cypress Westbridge"
+       if the firmware is not loaded. Once you identify the bus number BBB
+       and device number DDD, you can find the device under
+       /dev/bus/BBB/DDD
+
+       Example invocation:
+
+       sudo fxload -t fx3 -I ~/devel/kde-devel/src/indi-3rdparty/libqhy/firmware/QHY5III178.img -D /dev/bus/usb/003/021
+
+       Found from: https://www.qhyccd.com/bbs/index.php?topic=7239.0
+
+       You can make this permanent as described here:
+       https://www.qhyccd.com/bbs/index.php?topic=6256.15
+
+
+
+**** Dependency for ASI cameras
+
+     + For ASI cameras, first build libasi shipped with indi-3rdparty
+
+       cd ~/devel/indi-3rdparty/
+       cd libasi/
+       cmake -DCMAKE_BUILD_TYPE=Release .
+       make
+       sudo make install
+
+**** Build and Install the Drivers
+
+     cd ~/devel/indi-3rdparty/
+     cmake -DCMAKE_BUILD_TYPE=Release . # Will probably fail, but that's okay
+
+     ccmake .
+
+     Disable everything you don't want. You may need `fxload` to update
+     firmware. Hit 'c' to configure. Tackle any errors and missing
+     dependencies.
+
+     VERBOSE=1 make -j4
+     sudo make install
+
+*** Check
+
+    + The following should work if you build ASI drivers:
+
+      LD_LIBRARY_PATH=/usr/local/lib/ indiserver indi_asi_ccd
+
+    + The following should work if you built QHY drivers:
+
+      LD_LIBRARY_PATH=/usr/local/lib/ indiserver indi_asi_ccd
+
+** Fix library paths
+
+   + With sudo, create the file in an editor:
+
+     /etc/ld.so.conf.d/local.conf
+
+     with the following two lines:
+
+     /usr/local/lib
+     /usr/local/lib64
+
+   + Run `sudo ldconfig`
+
+   + Check: `indiserver indi_asi_ccd` without LD_LIBRARY_PATH
+
+* Install X-based projects
+** Display Manager and Desktop Environment
+   + sudo pacman -S lightdm openbox xorg-server lightdm-gtk-greeter xterm xorg-xev
+   + sudo systemctl enable lightdm.service
+   + sudo systemctl start lightdm.service
+   + sudo pacman -S xorg-xinput wmctrl 
+** Scope positioning UI
+*** Clone
+    cd ~/devel
+    git clone bas:/home/akarsh/scope_positioning.git
+*** Setup the Python environment
+**** System dependencies
+     sudo pacman -S python-virtualenv
+     sudo pacman -S swig # For PyINDI bindings
+     sudo pacman -S python-matplotlib python-pyqt5 # Packages that we install via the system
+**** Virtualenv and pip dependencies
+     cd scope_positioning
+     python -m virtualenv --system-site-packages venv
+     source venv/bin/activate
+     pip install -r requirements.txt
+**** PyINDI-client from source
+     cd ~/devel
+     git clone https://github.com/geehalel/pyindi-client.git
+     cd pyindi-client/
+
+     Ensure that your venv is activated, run:
+
+     python setup.py install
+
+     In this case, the build did not succeed because of breaking changes in
+     INDI master, so I rolled back indi, indi-3rdparty to the most recent
+     tag and rebuilt and reinstalled them. Then I was able to build
+     pyindi-client.
+
+**** Check the sanity of the environment
+     cd ~/devel/scope_positioning
+     make -j5 lint
+
+     This should not report any import-errors
+
+     Then try running the actual program:
+
+     DISPLAY=:0 ./main.py
+
+     and see if it works
+
+**** Troubleshooting
+
+     + I encountered a problem with pyindi-client, documented here:
+       https://indilib.org/forum/development/8727-problem-importing-pyindi.html#66756
+
+       Rolling back the version of INDI to v1.8.6 and 3rd party to v1.8.6
+       resolved the problem.
+
+     + Note that DISPLAY=localhost:0.0 does not work, but DISPLAY=:0 works!
+
+** KStars
+*** Dependencies
+    sudo pacman -S extra-cmake-modules qt5-declarative qt5-svg qt5-websockets kf5 eigen stellarsolver
+
+*** Clone
+    cd ~/devel
+    git clone https://invent.kde.org/education/kstars.git
+
+*** Build
+    + Configure:
+
+      cd kstars/
+      cmake .
+
+      Then turn off testing, because tests produce HUGE amounts of data that will fill up your SD card:
+      ccmake .
+      Find the TESTING option and turn it off.
+
+    + Then build and install:
+
+      make -j6
+      sudo make install
+
+*** Run to test
+
+    DISPLAY=:0 kstars
+
+* Inertial Motion sensors
+** USFS MPU9250
+   The "Ultimate Sensor Fusion Solution" is an MPU9250-based board with
+   the SENTral MPU motion co-processor, available from:
+   https://www.tindie.com/products/onehorse/ultimate-sensor-fusion-solution-mpu9250/
+
+   The Raspberry Pi library is GPL, so we choose to write our own.
+
+*** I²C tutorials and resources
+    + N.B. "Bus controller" = "Master", "Peripheral" = "Slave"
+    + The clock signal is always generated by the current bus controller;
+      some peripheral devices may force the clock low at times to delay
+      the controller sending more data (or to require more time to prepare
+      data before the controller attempts to clock it out). This is called
+      "clock stretching" and is described on the protocol page.
+    + I²C refresher: https://www.circuitbasics.com/basics-of-the-i2c-communication-protocol/
+    + I²C application note: https://www.ti.com/lit/an/slva704/slva704.pdf
+    + I²C video: https://youtu.be/6IAkYpmA1DQ?t=162
+    + https://raspberry-projects.com/pi/programming-in-python/i2c-programming-in-python/using-the-i2c-interface-2
+    + Arduino I²C scanner: https://playground.arduino.cc/Main/I2cScanner/
+
+*** Connecting
+    + GPIO Pinout of Raspberry Pi can be seen here:
+      https://www.raspberrypi.org/documentation/usage/gpio/
+
+      The I²C port comprised of pins 3 and 5 is preferable for some reason
+      that I cannot remember.
+
+      Connect SDA on USFS board to Pin 3, and SCL to Pin 5.
+      Connect 3V3 on USFS to Pin 1
+
+      Any truly general purpose GPIO pin can be used as an interrupt. I
+      choose to connect the INT pin on USFS to GPIO17 (Pin 11) and the
+      ground to Pin 9.
+
+    + Once the device is connected, you should be able to see it in the
+      I²C scan:
+
+      $ sudo i2cdetect -y 1
+
+      0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+      00:                         -- -- -- -- -- -- -- -- 
+      10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+      20: -- -- -- -- -- -- -- -- 28 -- -- -- -- -- -- -- 
+      30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+      40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+      50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+      60: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+      70: -- -- -- -- -- -- -- --                         
+
+    + The device identifies itself as 0x28
+
+*** Python SMBUS
+
+    The smbus2 package can be used to talk to peripherals over I²C:
+    https://pypi.org/project/smbus2/
+
+    Ref. the TI application note --
+    https://www.ti.com/lit/an/slva704/slva704.pdf -- even in an I²C, the
+    controller determines how many bytes it wants to read from the
+    peripheral. This explains the nature of the methods available in
+    smbus2: they need to specify the number of bytes to read from the
+    peripheral.
+
+    smbus2 documentation is here: https://smbus2.readthedocs.io/en/latest/
+    Examples are on the project page.
+
+    Note that "offset" in the documentation simply refers to the address
+    of the register.
+
+*** Talking to the SENTral MPU: first forays
+
+    The SENTral MPU EM7180 datasheet is available here:
+    https://d3s5r33r268y59.cloudfront.net/datasheets/6282/2015-12-28-00-49-49/EMSentral_EM7180_Technical_Datasheet_v1_3.pdf
+
+    Note that it needs magnetic calibration data, but since I purchased
+    the board from Tindie, this has already been loaded for the California
+    Bay Area.
+
+    The code here is open-source on a permissive license ("Beerware") and
+    we can therefore use it:
+    https://github.com/kriswiner/EM7180_SENtral_sensor_hub
+
+    All the interesting stuff is however happening inside the C library in
+    that project. Look at this header for all the definitions of register
+    addresses and such:
+    https://github.com/kriswiner/EM7180_SENtral_sensor_hub/blob/master/EM7180_LSM6DSM_LIS2MDL_LPS22HB/USFS.h
+
+**** Hello, EM7180
+     Start by referring to Section 5, Fig 5-1 (Page 17) of the EM7180
+     datasheet. This shows the state-flow. Since the configuration file
+     must exist in EEPROM, the EM7180 must start up in "Initialized
+     State". Then refer to Table 5-1, which shows us how to query the
+     status of the SENtral MPU by reading register 0x37.
+
+     The following "Hello World" python program should yield the binary
+     result '1011', indicating that the EM7180 found and loaded the EEPROM
+     data without error, and is idle.
+
+     In [0]: from smbus import SMBus
+     In [0]: bus = SMBus(1)
+     In [1]: '{:08b}'.format(bus.read_byte_data(0x28, 0x37))
+     Out[1]: '00001011'
+
+     In the "idle" mode, no motion sensor output is produced. For that, we
+     need to put it in "Normal Operation" mode.
+
+**** "Normal Operation" mode: Reading a quaternion with the bare minimum steps
+     Next, we want to put the sensor into "normal operation" state. Refer
+     to Figure 5-1 on Page 17 again. This involves setting the data rates
+     and asking the EM7180 to go into normal operation state.
+
+     Refer now to Section 5.2 of the manual.
+
+     Note the detail: "If a sensor rate is set to 0x00, SENtral will
+     shutdown the sensor and disable SENtral background calibration."  Also
+     note that Accel and Gyro rates are set to 1/10th of the rate, whereas
+     Mag rate matches the desired output data rate.
+
+     Another detail to note: "SENtral automatically increments to the next
+     register"
+
+     To get a meaningful quaternion, we unfortunately must start with an
+     undocumented step that is gleaned from this code here:
+     https://github.com/kriswiner/EM7180_SENtral_sensor_hub/blob/master/EM7180_LSM6DSM_LIS2MDL_LPS22HB/USFS.cpp#L92
+     Starting the sensor following the instructions without performing this
+     step results in "Normal Operation" with No Errors whatsoever, but the
+     quaternion is always 0.
+
+     So we start by setting up the LPF's of the accel and gyro:
+     In [2]: bus.write_byte_data(0x28, 0x5B, 3)
+     In [3]: bus.write_byte_data(0x28, 0x5C, 3)
+
+     So we can just write one block to set all three rates. Looking at the
+     example on Page 23 of the datasheet, we can do:
+
+     In [4]: bus.write_i2c_block_data(0x28, 0x55, [0x64, 0x0A, 0x0F])
+
+     to set the rates. You can check that this succeeded:
+
+     In [5]: bus.read_byte_data(0x28, 0x55)
+     Out[5]: 100
+
+     In [6]: bus.read_byte_data(0x28, 0x56)
+     Out[6]: 10
+
+     In [7]: bus.read_byte_data(0x28, 0x57)
+     Out[7]: 15
+
+     Next, we must set the Quaternion rate divisor, but we can skip this,
+     because it is automatically set to 1. Next we must set the desired
+     outputs (Algorithm Control), but to get a quaternion, we don't need to
+     do that since it is the default. We also don't necessarily need
+     interrupts at this "testing" stage, so we ignore the EnableEvents
+     register too.
+
+     We now just need to put the EM7180 in "run" state, so we can query its
+     quaternion registers. To do this, refer to Table 5-5 on Page 25. We
+     should simply write 0x01 to the HostControl register 0x34:
+
+     In [6]: bus.write_byte_data(0x28, 0x34, 0x01)
+
+     We wait for some time. Then we can check if there are any errors:
+
+     In [7]: bus.read_byte_data(0x28, 0x35)
+     Out[7]: 0
+
+     And we can check that the MPU is running, i.e. in "Normal Operation":
+
+     In [8]: bus.read_byte_data(0x28, 0x37)
+     Out[8]: 3
+
+     Note that the bit corresponding to idle in the status register is off.
+
+     Now we look at Table 5-7 to find out how to read result registers. We
+     must read 16 bytes starting from register 0x00 to get the quaternion
+     data:
+
+     In [9]: bus.read_i2c_block_data(0x28, 0x00, 16)
+     Out[9]: [50, 78, 154, 190, 130, 113, 12, 191, 113, 177, 26, 190, 177, 221, 67, 63]
+
+     Okay, to make sense of this quaternion, we must convert the bytes into
+     4 floats:
+
+     In [10]: import struct
+     In [11]: raw_quat = bus.read_i2c_block_data(0x28, 0x00, 16)
+     In [12]: [struct.unpack('<f', bytearray(raw_quat[0+i*4:4+i*4])) for i in range(4)]
+     Out[12]: 
+     [(-0.3013778328895569,),
+     (-0.5486069917678833,),
+     (-0.15106751024723053,),
+     (0.7651014924049377,)]
+
+     We can check that it is indeed normalized:
+
+     In [13]: quat = [struct.unpack('<f', bytearray(raw_quat[0+i*4:4+i*4])) for i in range(4)]
+
+     In [14]: sum([q[0]**2 for q in quat])
+     Out[14]: 0.9999999159063722
+
+*** Setting up using PyFTDI
+    + Add the following udev rules (for FT232H):
+
+      SUBSYSTEM=="usb", ATTR{idVendor}=="0403", ATTR{idProduct}=="6014", GROUP="i2c", MODE="0664"
+
+      For more details or for other chipsets, see:
+      https://eblot.github.io/pyftdi/installation.html
+
+      Reload udev rules (not tested):
+
+      sudo udevadm control --reload-rules
+      sudo udevadm trigger --verbose
+
+    + Install pyftdi if not already installed
+
+    + Run i2cscan.py to find the port (ftdi://...) corresponding to the device
+
+    + Then run i2cscan.py with the appropriate port, like
+
+      i2cscan.py ftdi://ftdi:232h:1/1
+
+      and you should see the USFS at 0x28
+
+* GPS using U-Blox 7 dongle
+** Packages and Configuration
+   + pacman -S gpsd
+
+   + Then make sure the new udev rules are triggered: sudo udevadm trigger
+
+   + Unplug and replug the dongle and see if you have /dev/gps0
+
+   + If you don't, try http://kilodelta.com/2017/configuring-uBlox7-GPS-on-Raspbian-Jessie/
+
+** Sanity check
+
+   + Run cgps to see if you can get a fix. Might not work indoors.
+* VNC server
+** Install
+sudo pacman -S x11vnc
+** Configure
++ su to root
++ Create a password by running x11vnc -storepasswd
++ Run
+  
+  systemctl edit --full x11vnc.service
+
+  and change the contents to:
+
+  [Unit]
+  Description=VNC Server for X11
+  Requires=display-manager.service
+  After=display-manager.service
+
+  [Service]
+  ExecStart=/usr/bin/x11vnc -auth guess -forever -loop -noxdamage -repeat -rfbauth /root/.vnc/passwd -rfbport 5900 -clip xinerama0
+
+  [Install]
+  WantedBy=graphical.target
+
+** Enable
+
+   sudo systemctl enable x11vnc.service
+
+** Client config
+
+   Install TigerVNC and use the vncviewer. You may want to adjust the
+   compression etc so that it's optimizing less on bandwidth.
+
+* WiFi Access Point
+Setting up the RPi as a WiFi access point will make it easy to connect to it wirelessly
+
+Following the relevant parts of this:
+https://www.raspberrypi.org/documentation/configuration/wireless/access-point-routed.md
+
+We don't need NAT or IP forwarding.
+
+** Packages
+ sudo pacman -S hostapd dnsmasq
+
+** Enable Host APD on startup
+
+sudo systemctl unmask hostapd
+
+** Setup static IP for wlan0
+
+Add these lines to the end of /etc/dhcpcd.conf to ensure static IP for wlan0
+
+interface wlan0
+    static ip_address=192.168.35.1/24
+    nohook wpa_supplicant
+
+** Setup the DHCP / DNS server (dnsmasq)
+
+Edit /etc/dnsmasq.conf by adding these lines. Note: Check first with
+/sbin/ifconfig -a that your WiFi interface is indeed called
+wlan0. Ensure that your IP address choices line up.
+
+  interface=wlan0
+  dhcp-range=192.168.35.50,192.168.35.150,255.255.255.0,24h
+  domain=wlan
+  address=/valentine.wlan/192.168.35.1
+
+** Setup the WiFi interface
+
+Enable RF:
+
+  sudo rfkill unblock wlan0
+
+Then edit /etc/hostapd/hostapd.conf as per the following template:
+
+  country_code=US
+  interface=wlan0
+  ssid=NameOfNetwork
+  hw_mode=g
+  channel=7
+  macaddr_acl=0
+  auth_algs=1
+  ignore_broadcast_ssid=0
+  wpa=2
+  wpa_passphrase=AardvarkBadgerHedgehog
+  wpa_key_mgmt=WPA-PSK
+  wpa_pairwise=TKIP
+  rsn_pairwise=CCMP
+
+Obviously, pick your ssid and password
+
+** Disable conflicting modules
+
+   sudo systemctl disable systemd-resolved
+   sudo systemctl stop systemd-resolved
+   sudo rm /etc/resolv.conf
+   sudo touch /etc/resolv.conf
+
+** Enable modules
+
+   sudo systemctl enable hostapd.service
+   sudo systemctl enable dnsmasq.service
+   sudo systemctl enable dhcpcd.service
+
+** Start modules
+
+   sudo systemctl start hostapd.service
+   sudo systemctl start dnsmasq.service
+   sudo systemctl start dhcpcd.service
+
+** Connect to the WiFi
+
+   Use the SSID and password to connect
+
+* RTC
+** Product
+   https://www.amazon.com/dp/B00ZOXWHK4/ -- Makerfire I2C RTC module for RPi
+** Instruction source
+   https://wiki.52pi.com/index.php/DS1307_RTC_Module_with_BAT_for_Raspberry_Pi_SKU:_EP-0059
+** Setup Procedure
++ Plug it in very carefully making sure you do not misalign the header!
++ Run i2cdetect -y 1 -- you should see it show up at 0x68
++ sudo modprobe rtc-ds1307
++ sudo su -c 'echo ds1307 0x68 > /sys/class/i2c-adapter/i2c-1/new_device'
++ You should read some relevant output in `dmesg`:
+
+  [156816.473851] rtc-ds1307 1-0068: registered as rtc0
+  [156816.473968] i2c i2c-1: new_device: Instantiated device ds1307 at 0x68
+
++ There does not seem to be a fake hwclock on ALARM as of this writing.
++ Edit /boot/config.txt to add:
+
+  dtoverlay=i2c-rtc,ds1307
+
+  (even if there is an existing dtoverlay line)
+
++ Reboot
+** Check and sync time into the RTC
++ Check if you got the RTC:
+
+  dmesg | grep rtc
+
+  Check if the device exists:
+
+  ls /dev/rtc0
+
++ Ensure your system time is correct
+
+  Connect to internet and run `sudo ntpd -q` and terminate after a
+  while. Should sync.
+
++ Sync time into RTC:
+
+  sudo hwclock --systohc -u
+
++ Sync time from RTC to system
+
+  sudo hwclock -s

@@ -1,0 +1,25 @@
+escape \034\034
+deflow
+defescape \034\034
+startup_message off
+vbell off
+altscreen on
+hardstatus on
+hardstatus alwayslastline "%{-b gk}%-w%{+b WR}%50>%n %t%{-b gk}%+w%< %= %{mk}%l %{ck}%d%{wk}-%{ck}%m %{gk}%c"
+#hardstatus alwayslastline "%{-b gk}%{+b WR}%50>%n %t%{-b gk}%+w%< %= %{mk}%l %{ck}%d%{wk}-%{ck}%m %{gk}%c"
+
+# terminfo and termcap for nice 256 color terminal
+# allow bold colors - necessary for some reason
+attrcolor b ".I"
+# tell screen how to set colors. AB = background, AF=foreground
+termcapinfo xterm 'Co#256:AB=\E[48;5;%dm:AF=\E[38;5;%dm'
+# erase background with current bg color
+defbce "on"
+
+term xterm-256color
+bind ^- other
+screen -t KStars 0 /bin/bash -c 'cd /home/akarsh/devel/kde-devel/src/kstars && source /home/akarsh/devel/kde-devel/src/kstars/.my-setup && kstars'
+screen -t INDI 1 /bin/bash -c 'cd /home/akarsh/devel/kde-devel/src/kstars && source /home/akarsh/devel/kde-devel/src/kstars/.my-setup && indiserver indi_asi_ccd'
+screen -t RealSky 2 /home/akarsh/devel/realsky_server/realsky_server
+screen -t Main 3 /home/akarsh/devel/scope_positioning/run.sh
+screen -t Gen 4

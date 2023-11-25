@@ -1,0 +1,17 @@
+wheel
+astropy
+ipython
+pillow
+pyquaternion
+julian
+numpy
+pyserial
+urllib3
+pyindi-client
+sep
+pylint
+smbus2
+pyftdi
+gpsd-py3
+pyqt5
+matplotlib

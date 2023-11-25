@@ -1,0 +1,9 @@
+\#*\#
+*.log
+uistate*.json
+alignment.json
+alignment_history.json
+__pycache__
+*_calibration.json
+ui.py
+ui_eyepieceview.py

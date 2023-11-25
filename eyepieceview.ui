@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>eyepieceViewDialog</class>
+ <widget class="QDialog" name="eyepieceViewDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1206</width>
+    <height>742</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Eyepiece View</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QObject {
+background-color:black;
+color:white;
+}
+
+/* Adapted from https://github.com/Alexhuszagh/BreezeStyleSheets/blob/master/dark.qss (MIT License) */
+QWidget
+{
+    selection-background-color:#990000;
+}
+
+QWidget:item:hover
+{
+    background-color: #330000;
+}
+
+QWidget:item:selected
+{
+    background-color: #990000;
+}
+
+QWidget:disabled
+{
+   color: #444444;
+}
+
+QWidget:focus
+{
+   border: 0.2ex solid #ff0000;
+}
+
+QPushButton
+{
+    border: 0.1ex solid #770000;
+}
+
+QPushButton:hover
+{
+    border: 0.1ex solid #990000;
+}
+
+QPushButton:focus:pressed,
+QPushButton:pressed
+{
+background-color: qlineargradient(x1: 0.5, y1: 0.5 x2: 0.5, y2: 1, stop: 0 #ffdddd, stop: 0.5 #eedddd);
+color: #31363B;
+}
+</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="EyepieceImageViewer" name="eyepieceView"/>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>EyepieceImageViewer</class>
+   <extends>QGraphicsView</extends>
+   <header>eyepieceimageviewer</header>
+   <slots>
+    <slot>fitInView()</slot>
+    <slot>setFovCircle(double)</slot>
+   </slots>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
