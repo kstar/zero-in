@@ -125,6 +125,19 @@ this purpose around it, which I shall release separately.
 happens in `backend.py` which handles various tasks including invoking
 the solver and handling some math.
 
+## Alt-Az Workshop Presentation
+
+I presented the general ideas behind this proof-of-concept (along with
+a crude demo video) at the 2021 Portland Alt-Az Workshop. The video
+recording of the talk is available
+[here](https://www.youtube.com/watch?v=VLSbmhEUWO0&t=6855s) and the
+slides are available [here](https://asimha.net/AltAzWorkshopTalk2021.pdf)
+
+## White paper
+
+A white paper on the IMU recalibration algorithm is expected
+eventually
+
 ## Copyright and License
 
 The code (where not sourced from other projects) is Copyright (c)
